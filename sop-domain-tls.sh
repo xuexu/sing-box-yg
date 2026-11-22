@@ -1,13 +1,18 @@
 sop_domain_tls() {
 local DOMAIN="xjp-amd1.1314510.xyz"
 local CERT_DIR="/root/ygkkkca"
-local WS_PORT="2052"
+local WS_PORT
+WS_PORT=$(jq -r '.inbounds[1].listen_port // empty' /etc/s-box/sb.json 2>/dev/null)
+if [ -z "$WS_PORT" ]; then
+  WS_PORT=$(jq -r '[.inbounds[] | select(.tag == "vmess-sb") | .listen_port] | first // empty' /etc/s-box/sb.json 2>/dev/null)
+fi
+[ -z "$WS_PORT" ] && WS_PORT=2052
 local TS; printf -v TS '%(%F)T' -1
-local FAIL=0 cur="" dnsip="" pubip=""
+local FAIL=0 cur="" curcl="" resid="" dnsip="" pubip=""
 
 echo "=========================================================="
 echo " sing-box-yg 一键：vmess-ws 开 TLS + 节点地址改域名"
-echo " 域名=$DOMAIN   证书=$CERT_DIR   端口=$WS_PORT   日期=$TS"
+echo " 域名=$DOMAIN   证书=$CERT_DIR   端口=$WS_PORT（vmess-sb 自动探测）   日期=$TS"
 echo "=========================================================="
 
 if [ -z "$DOMAIN" ]; then echo "[ABORT] 域名占位符未填写"; return 1; fi
@@ -71,15 +76,30 @@ echo; echo "--- 4/5 节点地址改为域名 ---"
 [ -f /etc/s-box/server_ip.log ]   && cp -f /etc/s-box/server_ip.log   /etc/s-box/server_ip.log.bak
 [ -f /etc/s-box/server_ipcl.log ] && cp -f /etc/s-box/server_ipcl.log /etc/s-box/server_ipcl.log.bak
 printf '3\n10\n0\n' | timeout 150 sb -d "$DOMAIN" > /tmp/sop_domain.log 2>&1
-read -r cur 2>/dev/null < /etc/s-box/server_domain.log
-if [ "$cur" = "$DOMAIN" ]; then
-  echo "[OK]   server_domain.log = $DOMAIN（已持久化）"
-else
-  echo "[WARN] 域名未持久化，回退写 server_ip.log"
+# 成功判定只看 server_ip.log 的内容（不再依赖 server_domain.log）
+read -r cur   2>/dev/null < /etc/s-box/server_ip.log
+read -r curcl 2>/dev/null < /etc/s-box/server_ipcl.log
+if [ "$cur" != "$DOMAIN" ]; then
+  echo "[WARN] sb -d 未把节点地址写成域名（当前 server_ip.log = ${cur:-<空>}），改为直接写入"
   printf '%s\n' "$DOMAIN" > /etc/s-box/server_ip.log
   printf '%s\n' "$DOMAIN" > /etc/s-box/server_ipcl.log
-  echo "[WARN] 已写入地址文件，需手动在菜单重新生成一次订阅"
+  read -r cur   2>/dev/null < /etc/s-box/server_ip.log
+  read -r curcl 2>/dev/null < /etc/s-box/server_ipcl.log
+fi
+if [ "$cur" = "$DOMAIN" ]; then
+  echo "[OK]   server_ip.log = $DOMAIN"
+else
+  echo "[FAIL] server_ip.log 写入失败（当前 = ${cur:-<空>}）"
   FAIL=1
+fi
+[ "$curcl" = "$DOMAIN" ] && echo "[OK]   server_ipcl.log = $DOMAIN" \
+  || echo "[WARN] server_ipcl.log 未同步为域名（只影响 cli 订阅）"
+
+# 订阅是否刷新：额外确认聚合订阅里已含域名
+if grep -qF "$DOMAIN" /etc/s-box/jhsub.txt 2>/dev/null; then
+  echo "[OK]   聚合订阅 jhsub.txt 已含域名"
+else
+  echo "[WARN] 聚合订阅 jhsub.txt 未含 $DOMAIN，请在菜单 3 → 8/9 重新生成订阅"
 fi
 
 echo; echo "--- 5/5 结果验证 ---"
@@ -101,9 +121,24 @@ PY
 timeout 15 openssl s_client -connect "$DOMAIN:$WS_PORT" -servername "$DOMAIN" </dev/null > /tmp/sop_tls.txt 2>&1
 grep -q "Verify return code: 0" /tmp/sop_tls.txt && echo "[OK]   TLS 握手验证通过" \
   || { echo "[WARN] TLS 握手异常，摘要："; grep -m2 -i "verify\|error" /tmp/sop_tls.txt; FAIL=1; }
-if [ -n "$pubip" ] && grep -q "$pubip" /etc/s-box/jhsub.txt 2>/dev/null; then
-  echo "[WARN] 聚合订阅 jhsub.txt 仍含本机IP $pubip"
-else echo "[OK]   聚合订阅无本机IP残留"; fi
+# 残留 IP 检查：聚合订阅里任何形如 x.x.x.x 且非本机/内网的地址都要报出来
+resid=$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' /etc/s-box/jhsub.txt 2>/dev/null | sort -u | awk -F. '
+  $1<=255 && $2<=255 && $3<=255 && $4<=255 {
+    if ($1==0 || $1==10 || $1==127 || $1>=224) next
+    if ($1==192 && $2==168) next
+    if ($1==172 && $2>=16 && $2<=31) next
+    if ($1==169 && $2==254) next
+    print
+  }')
+if [ -n "$resid" ]; then
+  echo "[WARN] 聚合订阅 jhsub.txt 仍含 IP 地址（节点地址应为域名）："
+  printf '%s\n' "$resid" | sed 's/^/         /'
+  if [ -n "$pubip" ] && printf '%s\n' "$resid" | grep -qxF "$pubip"; then
+    echo "         其中 $pubip 是本机公网 IP"
+  fi
+else
+  echo "[OK]   聚合订阅无 IP 残留"
+fi
 
 echo "=========================================================="
 if [ "$FAIL" = "0" ]; then echo " 结果：全部通过 ✅"
