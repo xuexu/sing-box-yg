@@ -72,6 +72,30 @@ bash <(curl -Ls https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sb.sh) 
 * 想改回 IP 输出：菜单 `3 → 10` 直接回车即可
 * 该设置保存在 `/etc/s-box/server_domain.log`，每次刷新订阅/更换IP时自动沿用
 
+#### 域名 + TLS 一键脚本（本 fork 附带）
+
+针对「证书已签发、但节点地址仍是 IP」的场景，仓库根目录附带两个独立脚本，在已用 `sb` 安装过的机器上做二次修正与 TLS 校验：
+
+| 脚本 | 用途 |
+|---|---|
+| `sop-domain-tls.sh` | 固定域名版：改脚本顶部 3 个变量（域名 / 证书路径 / 入站标签）后直接运行 |
+| `sop-domain-tls-auto.sh` | 域名自动探测版：无需改脚本，自动从 6 类来源推断域名并打分选优 |
+
+用法（自动探测版）：
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sop-domain-tls-auto.sh
+chmod +x sop-domain-tls-auto.sh
+./sop-domain-tls-auto.sh --detect            # 只探测：打印候选域名与打分，不写任何配置
+./sop-domain-tls-auto.sh                     # 探测 + 写入 + 校验，全绿时输出「结果：全部通过」
+./sop-domain-tls-auto.sh node.example.com    # 显式指定域名，跳过探测
+```
+
+* 探测来源与权重：`server_domain.log` > `sb.json` 中非 reality 入站的 `tls.server_name` > `/etc/s-box/*.txt` 订阅链接（add / sni / host）> 证书 SAN（精确 +4、通配 +3）> PTR 反解；命中「域名解析指向本机」再 +2
+* 内置伪装域名黑名单（apple / bing / microsoft / icloud / cloudflare / amazon 等 30 余条），避免误把上游 SNI 伪装域名当成自己的域名
+* 脚本只改「节点地址」相关字段与 `/etc/s-box/*.log`，不触碰入站端口、协议与证书文件；执行前自动备份 `sb.json`
+* 依赖：`bash`、`jq`、已安装的 `sing-box` 环境
+
 一键快捷命令现实本地IP订阅：```printf '3\n8\n1\n订阅密码' | sb```
 
 一键快捷命令现实Argo临时隧道：```printf '3\n3\n1\n1' | sb```
@@ -79,7 +103,6 @@ bash <(curl -Ls https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sb.sh) 
 一键快捷命令现实Argo固定隧道：```printf '3\n3\n2\n1\n固定密钥\n固定域名' | sb```
 
 一键快捷命令现实域名分流：```printf '5\n2\n1\n后缀域名1 后缀域名2' | sb```
-
 
 ### Sing-box-yg脚本界面预览图（注：相关参数随意填写，仅供围观）
 
@@ -123,7 +146,6 @@ bash <(curl -Ls https://raw.githubusercontent.com/xuexu/sing-box-yg/main/serv00.
 
 #### Serv00/Hostuno-sb-yg脚本界面预览图，仅限方案一的SSH端安装脚本（注：仅供围观）
 ![a6b776a094566ab14e88fdcd70ba9e9](https://github.com/user-attachments/assets/90a918ed-aec7-4a1f-8159-97f3acfd0092)
-
 
 -----------------------------------------------------
 ### 感谢支持！微信打赏甬哥侃侃侃ygkkk
