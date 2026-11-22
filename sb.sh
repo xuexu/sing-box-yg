@@ -197,12 +197,135 @@ sleep 1
 green "执行开放端口，关闭防火墙完毕"
 }
 
+#==== 保持防火墙开启时的端口自动放行：不关闭防火墙，只放行脚本自身占用的端口 ====
+fwskip=0
+fwopened=""
+fwtcp=""
+fwudp=""
+
+fwtype(){
+if command -v ufw >/dev/null 2>&1 && [[ "$(ufw status 2>/dev/null | awk '/^Status:/{print tolower($2)}')" = "active" ]]; then
+echo "ufw"
+elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
+echo "firewalld"
+elif command -v iptables >/dev/null 2>&1 && [[ "$(iptables -S INPUT 2>/dev/null | grep -c '^-A INPUT')" -gt 0 || "$(iptables -S INPUT 2>/dev/null | awk '/^-P INPUT/{print $3}')" != "ACCEPT" ]]; then
+echo "iptables"
+else
+echo "none"
+fi
+}
+
+fwsave(){
+if command -v apk >/dev/null 2>&1; then
+rc-service iptables save >/dev/null 2>&1
+elif command -v netfilter-persistent >/dev/null 2>&1; then
+netfilter-persistent save >/dev/null 2>&1
+elif [ -d /etc/sysconfig ]; then
+iptables-save > /etc/sysconfig/iptables 2>/dev/null
+command -v ip6tables-save >/dev/null 2>&1 && ip6tables-save > /etc/sysconfig/ip6tables 2>/dev/null
+elif [ -d /etc/iptables ]; then
+iptables-save > /etc/iptables/rules.v4 2>/dev/null
+command -v ip6tables-save >/dev/null 2>&1 && ip6tables-save > /etc/iptables/rules.v6 2>/dev/null
+fi
+}
+
+fwadd(){
+local proto="$1" p r fw
+shift
+fw=$(fwtype)
+[[ "$fw" = "none" ]] && return 1
+for p in "$@"; do
+[[ -z "$p" ]] && continue
+case "$fw" in
+ufw)
+ufw allow "$p/$proto" >/dev/null 2>&1
+;;
+firewalld)
+r=$(echo "$p" | tr ':' '-')
+firewall-cmd --permanent --add-port="$r/$proto" >/dev/null 2>&1
+firewall-cmd --add-port="$r/$proto" >/dev/null 2>&1
+;;
+iptables)
+iptables -C INPUT -p "$proto" --dport "$p" -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT -p "$proto" --dport "$p" -j ACCEPT >/dev/null 2>&1
+if command -v ip6tables >/dev/null 2>&1; then
+ip6tables -C INPUT -p "$proto" --dport "$p" -j ACCEPT >/dev/null 2>&1 || ip6tables -I INPUT -p "$proto" --dport "$p" -j ACCEPT >/dev/null 2>&1
+fi
+;;
+esac
+fwopened="$fwopened $proto/$p"
+done
+}
+
+sbports(){
+# 从当前生效配置读取节点端口：TCP类为Vless/Vmess/Anytls，UDP类为Hy2/Tuic（多端口跳跃由nat表DNAT完成，过滤表看到的是主端口）
+local cjson i t lp
+fwtcp=""
+fwudp=""
+[[ -f /etc/s-box/sb.json ]] && cjson=$(sed 's://.*::g' /etc/s-box/sb.json 2>/dev/null)
+if [[ -n "$cjson" ]]; then
+for i in 0 1 2 3 4; do
+t=$(echo "$cjson" | jq -r ".inbounds[$i].type // empty" 2>/dev/null)
+lp=$(echo "$cjson" | jq -r ".inbounds[$i].listen_port // empty" 2>/dev/null)
+[[ -z "$lp" || "$lp" = "null" ]] && continue
+case "$t" in
+hysteria2|tuic|hysteria) fwudp="$fwudp $lp" ;;
+*) fwtcp="$fwtcp $lp" ;;
+esac
+done
+fi
+[[ -f /etc/s-box/subport.log ]] && fwtcp="$fwtcp $(cat /etc/s-box/subport.log 2>/dev/null)"
+[[ -f /root/ygkkkca/ca.log ]] && fwtcp="$fwtcp 80 443"
+fwtcp=$(echo $fwtcp | tr ' ' '\n' | awk 'NF' | sort -nu | tr '\n' ' ')
+fwudp=$(echo $fwudp | tr ' ' '\n' | awk 'NF' | sort -nu | tr '\n' ' ')
+}
+
+fwopenports(){
+local q="$1" fw
+fw=$(fwtype)
+if [[ "$fw" = "none" ]]; then
+[[ -n "$q" ]] && return 0
+yellow "未检测到生效中的 ufw/firewalld/iptables 防火墙，无需额外放行端口"
+yellow "若本机使用纯nftables，可手动放行：nft add rule inet filter input <tcp|udp> dport <端口> accept"
+return 0
+fi
+sbports
+if [[ -z "$fwtcp$fwudp" ]]; then
+[[ -n "$q" ]] && return 0
+yellow "未读取到需要放行的节点端口，跳过"
+return 0
+fi
+fwopened=""
+[[ -n "$fwtcp" ]] && fwadd tcp $fwtcp
+[[ -n "$fwudp" ]] && fwadd udp $fwudp
+[[ "$fw" = "iptables" ]] && fwsave
+[[ "$fw" = "firewalld" ]] && firewall-cmd --reload >/dev/null 2>&1
+echo "$fwopened" | tr ' ' '\n' | awk 'NF' | sort -u | tr '\n' ' ' > /etc/s-box/fwallow.log
+[[ -n "$q" ]] && return 0
+green "已保持防火墙开启，仅放行本脚本占用的端口："
+[[ -n "$fwtcp" ]] && green "  TCP端口：$fwtcp"
+[[ -n "$fwudp" ]] && green "  UDP端口：$fwudp"
+green "  放行方式：$fw"
+yellow "提示：VPS商家后台的安全组/防火墙仍需自行放行以上端口"
+yellow "后续更改端口、新增多端口跳跃或订阅端口会自动同步放行"
+}
+
+fwauto(){
+# 安装时选择保持防火墙的用户，之后任何端口变动都静默同步放行
+[[ -f /etc/s-box/fwallow.log ]] || return 0
+fwopenports quiet
+return 0
+}
+
 openyn(){
 red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 readp "是否开放端口，关闭防火墙？\n1、是，执行 (回车默认)\n2、否，跳过！自行处理\n请选择【1-2】：" action
 if [[ -z $action ]] || [[ "$action" = "1" ]]; then
 close
 elif [[ "$action" = "2" ]]; then
+fwskip=1
+echo
+yellow "已选择保持防火墙现状（不关闭防火墙）"
+yellow "节点与订阅链接创建完成后，将自动放行Vless、Vmess、Hy2、Tuic、Anytls及订阅端口"
 echo
 else
 red "输入错误,请重新选择" && openyn
@@ -2573,6 +2696,12 @@ sbshare
 red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 blue "可选择9，刷新并显示所有协议配置及分享链接"
 red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+if [[ "$fwskip" = "1" ]]; then
+red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+green "七、保持防火墙开启状态，自动放行节点与订阅端口"
+fwopenports
+red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+fi
 echo
 }
 
@@ -3091,7 +3220,7 @@ changeserv(){
 sbactive
 echo
 green "Sing-box配置变更选择如下:"
-readp "1：更换Reality域名伪装地址、切换自签证书与Acme域名证书、开关TLS\n2：更换全协议UUID(密码)、Vmess-Path路径\n3：设置Argo临时隧道、固定隧道\n4：切换IPV4或IPV6的代理优先级 (仅 1.10.7 内核可用)\n5：设置Telegram推送节点通知\n6：更换Warp-wireguard出站账户\n7：设置Gitlab订阅分享链接\n8：设置本地IP订阅分享链接\n9：设置所有Vmess节点的CDN优选地址\n10：设置节点地址为域名/服务器IP（切换IP输出）\n0：返回上层\n请选择【0-10】：" menu
+readp "1：更换Reality域名伪装地址、切换自签证书与Acme域名证书、开关TLS\n2：更换全协议UUID(密码)、Vmess-Path路径\n3：设置Argo临时隧道、固定隧道\n4：切换IPV4或IPV6的代理优先级 (仅 1.10.7 内核可用)\n5：设置Telegram推送节点通知\n6：更换Warp-wireguard出站账户\n7：设置Gitlab订阅分享链接\n8：设置本地IP订阅分享链接\n9：设置所有Vmess节点的CDN优选地址\n10：设置节点地址为域名/服务器IP（切换IP输出）\n11：放行节点与订阅端口（保持防火墙开启，仅放行必要端口）\n0：返回上层\n请选择【0-11】：" menu
 if [ "$menu" = "1" ];then
 changeym
 elif [ "$menu" = "2" ];then
@@ -3112,6 +3241,8 @@ elif [ "$menu" = "9" ];then
 vmesscfadd
 elif [ "$menu" = "10" ];then
 set_domain "$sbdm" && sbshare > /dev/null 2>&1 && sb
+elif [ "$menu" = "11" ];then
+fwopenports && sleep 3 && changeserv
 else 
 sb
 fi
@@ -3195,7 +3326,12 @@ crontab /tmp/crontab.tmp >/dev/null 2>&1
 rm /tmp/crontab.tmp
 fi
 sbshare > /dev/null 2>&1
+fwopenports quiet
+if [[ -n "$(cat /etc/s-box/fwallow.log 2>/dev/null)" ]]; then
+sleep 1 && green "本地IP订阅链接已更新完成，订阅端口已自动放行" && sleep 3 && sb
+else
 sleep 1 && green "本地IP订阅链接已更新完成" && sleep 3 && sb
+fi
 }
 
 vmesscfadd(){
@@ -3801,6 +3937,7 @@ fi
 }
 
 restartsb(){
+fwauto
 if command -v apk >/dev/null 2>&1; then
 rc-service sing-box restart
 else
