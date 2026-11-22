@@ -1,3 +1,7 @@
+> **本仓库为 fork**：[yonggekkk/sing-box-yg](https://github.com/yonggekkk/sing-box-yg) 的个人 fork，在原脚本基础上新增「用域名作为节点地址」功能（安装参数 `-d 你的域名`，或菜单 `3 → 10` 随时切换）。脚本作者、教程、视频与打赏信息版权均归原作者所有。
+
+----------------------------------------------------------------
+
 ### 一、Sing-box-yg精装桶一键五协议共存脚本（VPS专用）
 ### 二、Serv00/Hostuno-sb-yg多平台一键三协议共存脚本（Serv00/Hostuno专用）
 
@@ -16,7 +20,9 @@
 
 * 支持纯IPV6、纯IPV4、双栈VPS，支持amd与arm架构，支持alpine系统，推荐使用最新的Ubuntu系统
 
-* 小白简单模式：无需域名证书，回车三次就安装完成，复制、扫描你要的节点配置
+* 小白简单模式：无需域名证书，回车三次就安装完成，复制、扫描你要的节点配置（安装末尾会额外询问一次是否用域名作节点地址，回车跳过=用服务器IP）
+
+* 支持用域名作为节点地址输出：安装时加参数 `-d 你的域名`，或安装后在菜单 `3 → 10` 随时切换域名/IP
 
 #### 相关说明及注意点请查看[甬哥博客说明与Sing-box视频教程](https://ygkkk.blogspot.com/2023/10/sing-box-yg.html)
 
@@ -44,12 +50,27 @@
 ### VPS专用一键脚本如下：快捷方式：```sb```
 
 ```
-bash <(wget -qO- https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh)
+bash <(wget -qO- https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sb.sh)
 ```
 或者
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sb.sh)
 ```
+
+#### 用域名作为节点地址（本 fork 新增功能）
+
+脚本默认用服务器 IP 生成所有节点地址。若你已有**解析到本机**的域名，可在安装时直接指定，所有协议（Vless-reality / Vmess-ws / Hysteria-2 / Tuic-v5 / Anytls）及订阅链接都会改用该域名输出：
+
+```
+bash <(curl -Ls https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sb.sh) -d node.example.com
+```
+
+* 交互安装：不加参数时，脚本会在安装结束前询问一次域名，直接回车则沿用服务器 IP
+* 安装后随时切换：主菜单 `3. 变更配置` → `10. 设置节点地址为域名/服务器IP`
+* 域名仅作为「节点地址」，不改变各协议的传输方式与证书逻辑；Vmess-ws 开启 TLS 时，其 SNI 仍取 `ca.log` 中的域名
+* 使用域名后，本地 IP 订阅链接也会变成 `http://你的域名:订阅端口/订阅密码/clmi.yaml`
+* 想改回 IP 输出：菜单 `3 → 10` 直接回车即可
+* 该设置保存在 `/etc/s-box/server_domain.log`，每次刷新订阅/更换IP时自动沿用
 
 一键快捷命令现实本地IP订阅：```printf '3\n8\n1\n订阅密码' | sb```
 
@@ -97,7 +118,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.
 * Argo高度自定义：可以重置临时隧道; 可以继续使用上回的固定隧道; 也可以更换固定隧道的域名或token
 
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/serv00.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/xuexu/sing-box-yg/main/serv00.sh)
 ```
 
 #### Serv00/Hostuno-sb-yg脚本界面预览图，仅限方案一的SSH端安装脚本（注：仅供围观）
@@ -110,7 +131,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/ser
 
 ---------------------------------------
 ### 感谢你右上角的star🌟
-[![Stargazers over time](https://starchart.cc/yonggekkk/sing-box-yg.svg)](https://starchart.cc/yonggekkk/sing-box-yg)
+[![Stargazers over time](https://starchart.cc/xuexu/sing-box-yg.svg)](https://starchart.cc/xuexu/sing-box-yg)
 
 ---------------------------------------
 #### 声明：所有代码来源于Github社区与ChatGPT的整合

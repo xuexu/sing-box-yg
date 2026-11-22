@@ -12,6 +12,7 @@ yellow(){ echo -e "\033[33m\033[01m$1\033[0m";}
 blue(){ echo -e "\033[36m\033[01m$1\033[0m";}
 white(){ echo -e "\033[37m\033[01m$1\033[0m";}
 readp(){ read -p "$(yellow "$1")" $2;}
+[[ "$1" = "-d" || "$1" = "--domain" ]] && sbdm="$2"
 [[ $EUID -ne 0 ]] && yellow "请以root模式运行脚本" && exit
 stty erase $'\b' 2>/dev/null || stty erase '^H' 2>/dev/null
 #[[ -e /etc/hosts ]] && grep -qE '^ *172.65.251.78 gitlab.com' /etc/hosts || echo -e '\n172.65.251.78 gitlab.com' >> /etc/hosts
@@ -911,6 +912,23 @@ systemctl restart sing-box
 fi
 }
 
+set_domain(){
+if [[ -n "$1" ]]; then
+ym_domain="$1"
+else
+echo
+yellow "请输入已解析到本机的域名（所有节点地址将用该域名输出，回车跳过=使用服务器IP）"
+readp "域名：" ym_domain
+fi
+if [[ -n "$ym_domain" ]]; then
+echo "$ym_domain" > /etc/s-box/server_domain.log
+green "节点地址已设置为域名：$ym_domain"
+else
+rm -f /etc/s-box/server_domain.log
+green "节点地址将使用服务器IP输出"
+fi
+}
+
 ipuuid(){
 if command -v apk >/dev/null 2>&1; then
 status_cmd="rc-service sing-box status"
@@ -955,6 +973,12 @@ fi
 else
 red "Sing-box服务未运行" && exit
 fi
+if [[ -s /etc/s-box/server_domain.log ]]; then
+IFS= read -r server_ip < /etc/s-box/server_domain.log
+IFS= read -r server_ipcl < /etc/s-box/server_domain.log
+printf '%s\n' "$server_ip" > /etc/s-box/server_ip.log
+printf '%s\n' "$server_ipcl" > /etc/s-box/server_ipcl.log
+fi
 }
 
 wgcfgo(){
@@ -975,7 +999,7 @@ fi
 result_vl_vm_hy_tu(){
 if [[ -f /root/ygkkkca/cert.crt && -f /root/ygkkkca/private.key && -s /root/ygkkkca/cert.crt && -s /root/ygkkkca/private.key ]]; then
 ym=`bash ~/.acme.sh/acme.sh --list | tail -1 | awk '{print $1}'`
-echo $ym > /root/ygkkkca/ca.log
+[[ -n "$ym" ]] && echo "$ym" > /root/ygkkkca/ca.log
 fi
 rm -rf /etc/s-box/vm_ws_argo.txt /etc/s-box/vm_ws.txt /etc/s-box/vm_ws_tls.txt
 server_ip=$(cat /etc/s-box/server_ip.log)
@@ -2539,10 +2563,11 @@ inssbjsonser
 sbservice
 sbactive
 #curl -sL https://gitlab.com/rwkgyg/sing-box-yg/-/raw/main/version/version | awk -F "更新内容" '{print $1}' | head -n 1 > /etc/s-box/v
-curl -sL https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/version | awk -F "更新内容" '{print $1}' | head -n 1 > /etc/s-box/v
+curl -sL https://raw.githubusercontent.com/xuexu/sing-box-yg/main/version | awk -F "更新内容" '{print $1}' | head -n 1 > /etc/s-box/v
 red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 lnsb && blue "Sing-box-yg脚本安装成功，脚本快捷方式：sb" && cronsb
 echo
+set_domain "$sbdm"
 wgcfgo
 sbshare
 red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
@@ -3066,7 +3091,7 @@ changeserv(){
 sbactive
 echo
 green "Sing-box配置变更选择如下:"
-readp "1：更换Reality域名伪装地址、切换自签证书与Acme域名证书、开关TLS\n2：更换全协议UUID(密码)、Vmess-Path路径\n3：设置Argo临时隧道、固定隧道\n4：切换IPV4或IPV6的代理优先级 (仅 1.10.7 内核可用)\n5：设置Telegram推送节点通知\n6：更换Warp-wireguard出站账户\n7：设置Gitlab订阅分享链接\n8：设置本地IP订阅分享链接\n9：设置所有Vmess节点的CDN优选地址\n0：返回上层\n请选择【0-9】：" menu
+readp "1：更换Reality域名伪装地址、切换自签证书与Acme域名证书、开关TLS\n2：更换全协议UUID(密码)、Vmess-Path路径\n3：设置Argo临时隧道、固定隧道\n4：切换IPV4或IPV6的代理优先级 (仅 1.10.7 内核可用)\n5：设置Telegram推送节点通知\n6：更换Warp-wireguard出站账户\n7：设置Gitlab订阅分享链接\n8：设置本地IP订阅分享链接\n9：设置所有Vmess节点的CDN优选地址\n10：设置节点地址为域名/服务器IP（切换IP输出）\n0：返回上层\n请选择【0-10】：" menu
 if [ "$menu" = "1" ];then
 changeym
 elif [ "$menu" = "2" ];then
@@ -3085,6 +3110,8 @@ elif [ "$menu" = "8" ];then
 ipsub
 elif [ "$menu" = "9" ];then
 vmesscfadd
+elif [ "$menu" = "10" ];then
+set_domain "$sbdm" && sbshare > /dev/null 2>&1 && sb
 else 
 sb
 fi
@@ -3824,7 +3851,7 @@ rm /tmp/crontab.tmp
 
 lnsb(){
 rm -rf /usr/bin/sb
-curl -L -o /usr/bin/sb -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh
+curl -L -o /usr/bin/sb -# --retry 2 --insecure https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sb.sh
 chmod +x /usr/bin/sb
 }
 
@@ -3833,7 +3860,7 @@ if [[ ! -f '/usr/bin/sb' ]]; then
 red "未正常安装Sing-box-yg" && exit
 fi
 lnsb
-curl -sL https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/version | awk -F "更新内容" '{print $1}' | head -n 1 > /etc/s-box/v
+curl -sL https://raw.githubusercontent.com/xuexu/sing-box-yg/main/version | awk -F "更新内容" '{print $1}' | head -n 1 > /etc/s-box/v
 green "Sing-box-yg安装脚本升级成功" && sleep 5 && sb
 }
 
@@ -3924,7 +3951,7 @@ iptables -t nat -F PREROUTING >/dev/null 2>&1
 netfilter-persistent save >/dev/null 2>&1
 service iptables save >/dev/null 2>&1
 green "Sing-box卸载完成！"
-blue "欢迎继续使用Sing-box-yg脚本：bash <(curl -Ls https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sb.sh)"
+blue "欢迎继续使用Sing-box-yg脚本：bash <(curl -Ls https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sb.sh)"
 echo
 }
 
@@ -4152,7 +4179,7 @@ case $(uname -m) in
 aarch64) cpu=arm64;;
 x86_64) cpu=amd64;;
 esac
-curl -L -o /etc/s-box/sbwpph -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/sbwpph_$cpu
+curl -L -o /etc/s-box/sbwpph -# --retry 2 --insecure https://raw.githubusercontent.com/xuexu/sing-box-yg/main/sbwpph_$cpu
 chmod +x /etc/s-box/sbwpph
 fi
 ps -ef | grep '[s]bwpph' | awk '{print $2}' | xargs kill 2>/dev/null
@@ -4292,7 +4319,7 @@ blue "sing-box-yg脚本视频教程：https://www.youtube.com/playlist?list=PLMg
 echo
 blue "sing-box-yg脚本博客说明：http://ygkkk.blogspot.com/2023/10/sing-box-yg.html"
 echo
-blue "sing-box-yg脚本项目地址：https://github.com/yonggekkk/sing-box-yg"
+blue "sing-box-yg脚本项目地址：https://github.com/xuexu/sing-box-yg"
 echo
 blue "推荐甬哥新品：ArgoSBX一键无交互小钢炮脚本"
 blue "ArgoSBX项目地址：https://github.com/yonggekkk/argosbx"
@@ -4338,14 +4365,14 @@ white "-------------------------------------------------------------------------
 green " 0. 退出脚本"
 red "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 insV=$(cat /etc/s-box/v 2>/dev/null)
-latestV=$(curl -sL https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/version | awk -F "更新内容" '{print $1}' | head -n 1)
+latestV=$(curl -sL https://raw.githubusercontent.com/xuexu/sing-box-yg/main/version | awk -F "更新内容" '{print $1}' | head -n 1)
 if [ -f /etc/s-box/v ]; then
 if [ "$insV" = "$latestV" ]; then
 echo -e "当前 Sing-box-yg 脚本最新版：${bblue}${insV}${plain} (已安装)"
 else
 echo -e "当前 Sing-box-yg 脚本版本号：${bblue}${insV}${plain}"
 echo -e "检测到最新 Sing-box-yg 脚本版本号：${yellow}${latestV}${plain} (可选择7进行更新)"
-echo -e "${yellow}$(curl -sL https://raw.githubusercontent.com/yonggekkk/sing-box-yg/main/version)${plain}"
+echo -e "${yellow}$(curl -sL https://raw.githubusercontent.com/xuexu/sing-box-yg/main/version)${plain}"
 fi
 else
 echo -e "当前 Sing-box-yg 脚本版本号：${bblue}${latestV}${plain}"
